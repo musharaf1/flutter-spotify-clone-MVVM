@@ -1,0 +1,102 @@
+import 'package:client/core/providers/current_user_notifier.dart';
+import 'package:client/features/auth/model/user_model.dart';
+import 'package:client/features/auth/repositories/auth_local_repository.dart';
+import 'package:client/features/auth/repositories/auth_remote_repository.dart';
+import 'package:fpdart/fpdart.dart';
+import 'package:riverpod_annotation/riverpod_annotation.dart';
+part 'auth_viewmodel.g.dart';
+
+// @riverpod
+@Riverpod(keepAlive: true)
+class AuthViewModel extends _$AuthViewModel {
+  late AuthRemoteRepository _authRemoteRepository;
+  late AuthLocalRepository _authLocalRepository;
+  late CurrentUserNotifier _currentUserNotifier;
+  @override
+  AsyncValue<UserModel>? build() {
+    _authRemoteRepository = ref.watch(authRemoteRepositoryProvider);
+    _authLocalRepository = ref.watch(authLocalRepositoryProvider);
+    _currentUserNotifier = ref.watch(currentUserProvider.notifier);
+
+    return null;
+  }
+
+  Future<void> initSharedPreference() async {
+    await _authLocalRepository.init();
+  }
+
+  Future<void> signUp({
+    required name,
+    required email,
+    required password,
+  }) async {
+    state = AsyncValue.loading();
+
+    final res = await _authRemoteRepository.signup(
+      name: name,
+      email: email,
+      password: password,
+    );
+
+    final val = switch (res) {
+      Left(value: final l) => state = AsyncValue.error(
+        l.message,
+        StackTrace.current,
+      ),
+      Right(value: final r) => state = AsyncValue.data(r),
+    };
+    print(val);
+  }
+
+  Future<void> login({required email, required password}) async {
+    state = AsyncValue.loading();
+
+    final res = await _authRemoteRepository.login(
+      email: email,
+      password: password,
+    );
+
+    final val = switch (res) {
+      Left(value: final l) => state = AsyncValue.error(
+        l.message,
+        StackTrace.current,
+      ),
+      Right(value: final r) => state = _loginSuccess(r),
+    };
+    print(val);
+  }
+
+  AsyncValue<UserModel> _loginSuccess(UserModel user) {
+    _authLocalRepository.setToken(user.token);
+    _currentUserNotifier.addUser(user);
+
+    return state = AsyncValue.data(user);
+  }
+
+  Future<UserModel?> getUserData() async {
+    state = AsyncValue.loading();
+    final token = _authLocalRepository.getToken();
+
+    if (token != null) {
+      final user = await _authRemoteRepository.getUserData(token: token);
+
+      final val = switch (user) {
+        Left(value: final l) => state = AsyncValue.error(
+          l.message,
+          StackTrace.current,
+        ),
+        Right(value: final r) => _getSuccess(r),
+      };
+
+      return val.value;
+    }
+    state = const AsyncValue.error("No token found", StackTrace.empty);
+    return null;
+  }
+
+  AsyncValue<UserModel> _getSuccess(UserModel user) {
+    _currentUserNotifier.addUser(user);
+    print(user);
+    return state = AsyncValue.data(user);
+  }
+}
